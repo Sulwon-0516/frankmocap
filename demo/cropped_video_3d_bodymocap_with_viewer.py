@@ -118,6 +118,7 @@ class DemoOptions():
         '''
         For easy debug
         '''
+        self.opt.__setattr__('save_mesh_transformed', False)
         self.opt.__setattr__('save_smpl_param', True)
         self.opt.__setattr__('no_display', True)
         # I don't need render output anymore
@@ -189,9 +190,11 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
 
 
     #modification to extract mesh properly
-    if args.save_mesh_transformed:
-        args.frame_per_data = 1
+    if args.save_mesh_transformed or args.save_smpl_param:
+        args.__setattr__('frame_per_data', 1)
         c2ws = c2ws[0:len(db)]
+        print(len(db))
+
 
     fps = len(c2ws) // seconds 
     timer = Timer()
