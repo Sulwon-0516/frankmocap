@@ -18,7 +18,6 @@ import pickle
 from datetime import datetime
 
 from bodymocap.body_mocap_api import BodyMocap
-from bodymocap.body_bbox_detector import BodyPoseEstimator
 import mocap_utils.demo_utils as demo_utils
 import mocap_utils.general_utils as gnu
 from mocap_utils.timer import Timer
@@ -48,7 +47,7 @@ class DemoOptions():
         parser.add_argument('--openpose_dir', type=str, help='Directory of storing the prediction of openpose prediction')
 
         # output options
-        parser.add_argument('--out_dir', type=str, default='./mocap_output/get_mesh_with_rest_pose', help='Folder of output images.')
+        parser.add_argument('--out_dir', type=str, default='./mocap_output/get_smpl_params', help='Folder of output images.')
         # parser.add_argument('--pklout', action='store_true', help='Export mocap output as pkl file')
         parser.add_argument('--save_bbox_output', action='store_true', help='Save the bboxes in json files (bbox_xywh format)')
         parser.add_argument('--save_pred_pkl', action='store_true', help='Save the predictions (bboxes, params, meshes in pkl format')
@@ -82,19 +81,33 @@ class DemoOptions():
             choices=['pytorch3d', 'opendr', 'opengl_gui', 'opengl'], help="type of renderer to use")
 
         # cropped data loader
-        parser.add_argument('--bbox_path', type=str, default='/mnt/hdd/auto_colmap/20221026_dataset_iphone_statue/kaist_statue_inhee_dynamic/output/segmentations/selected', help='Path of storing bbox-npy')
-        parser.add_argument('--info_3d_path', type=str, default='/mnt/hdd/auto_colmap/20221026_dataset_iphone_statue/kaist_statue_inhee_dynamic/output/segmentations/selected/3D_info.json',  help='Path of storing bbox-npy & 3D positions')
-        parser.add_argument('--cropped_path', type=str, default='/mnt/hdd/auto_colmap/20221026_dataset_iphone_statue/kaist_statue_inhee_dynamic/output/segmentations/cropped', help='Path of storing bbox-npy & 3D positions')
-        parser.add_argument('--render_traj_path', type=str, default='/home/inhee/VCL/insect_recon/frankmocap/demo/camera_path_longer.json', help='Path of rendering camera')
-        parser.add_argument('--frame_per_data', type=int, default=4, help='render n consecutive frames using same mesh')
-        
+        if False:   
+            # for local
+            parser.add_argument('--bbox_path', type=str, default='/mnt/hdd/auto_colmap/20221026_dataset_iphone_statue/kaist_statue_inhee_dynamic/output/segmentations/selected', help='Path of storing bbox-npy')
+            parser.add_argument('--info_3d_path', type=str, default='/mnt/hdd/auto_colmap/20221026_dataset_iphone_statue/kaist_statue_inhee_dynamic/output/segmentations/selected/3D_info.json',  help='Path of storing bbox-npy & 3D positions')
+            parser.add_argument('--cropped_path', type=str, default='/mnt/hdd/auto_colmap/20221026_dataset_iphone_statue/kaist_statue_inhee_dynamic/output/segmentations/cropped', help='Path of storing bbox-npy & 3D positions')
+            parser.add_argument('--render_traj_path', type=str, default='/home/inhee/VCL/insect_recon/frankmocap/demo/camera_path_longer.json', help='Path of rendering camera')
+            parser.add_argument('--frame_per_data', type=int, default=4, help='render n consecutive frames using same mesh')
+        else:
+            # for server
+            
+            parser.add_argument('--bbox_path', type=str, default='/home/disk1/inhee/auto_colmap/iphone_inhee_statue/inhee_statue_dynamic/output/segmentations/selected', help='Path of storing bbox-npy')
+            parser.add_argument('--info_3d_path', type=str, default='/home/disk1/inhee/auto_colmap/iphone_inhee_statue/inhee_statue_dynamic/output/segmentations/selected/3D_info.json',  help='Path of storing bbox-npy & 3D positions')
+            parser.add_argument('--cropped_path', type=str, default='/home/disk1/inhee/auto_colmap/iphone_inhee_statue/inhee_statue_dynamic/output/segmentations/cropped', help='Path of storing bbox-npy & 3D positions')
+            parser.add_argument('--render_traj_path', type=str, default='/home/inhee/repos/frankmocap/demo/camera_path_longer.json', help='Path of rendering camera')
+            parser.add_argument('--frame_per_data', type=int, default=4, help='render n consecutive frames using same mesh')
+            
+            
         parser.add_argument('--res_video_name', type=str, default='long_novel_view', help='Resultant video name')
         
         parser.add_argument('--left_nerf_images', type=str, default='/home/inhee/VCL/insect_recon/nerfstudio/renders/nerfacto_default_long', help='Resultant video left lower part')
         parser.add_argument('--right_nerf_images', type=str, default='/mnt/hdd/experiments/nerfstudio/render/nerfacto_pifu_bbox_longer_imgs', help='Resultant video right lower part')
 
 
-        parser.add_argument('--save_mesh_transformed', action='store_true', help='save the converted mesh')
+        parser.add_argument('--save_mesh_transformed', action='store_true', help='save converted mesh')
+        parser.add_argument('--save_smpl_param', action='store_true', help='save raw smpl params')
+        parser.add_argument('--is_render', action='store_true', help='render and save imgs')
+        
         # 3d settings
         # parser.add_argument('--use_trans', action='store_true', help='Consider center shifting')
         
@@ -105,8 +118,10 @@ class DemoOptions():
         '''
         For easy debug
         '''
-        self.opt.__setattr__('save_mesh_transformed', True)
+        self.opt.__setattr__('save_smpl_param', True)
         self.opt.__setattr__('no_display', True)
+        # I don't need render output anymore
+        self.opt.__setattr__('is_render', False)
         return self.opt
 
 def mesh_from_output(pred_output_list, rot, trans, scale, imgSize):
@@ -209,45 +224,46 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
             bbox_size = data['nerf_scale']
             pred_mesh_list = mesh_from_output(pred_output_list, data['rot_mat'], data['trans'], bbox_size, imgSize)
 
-        # visualization
-        res_img, render_img, alpha = visualizer.visualize(
-            img_original_bgr,
-            i,
-            pred_mesh_list = pred_mesh_list, 
-            body_bbox_list = body_bbox_list)
-    
-        # load nerf images
-        left_nerf = cv2.imread(osp.join(args.left_nerf_images, str(i).zfill(5)+'.png'))
-        right_nerf = cv2.imread(osp.join(args.right_nerf_images, str(i).zfill(5)+'.png'))
-
-        # save combined images
-        comb_img_l = render_img + (1-alpha) * left_nerf
-        os.makedirs(args.out_dir+"/combl", exist_ok=True)
-        demo_utils.save_res_img(args.out_dir+"/combl", str(i).zfill(5)+'.png', comb_img_l)
+        if args.is_render:
+            # visualization
+            res_img, render_img, alpha = visualizer.visualize(
+                img_original_bgr,
+                i,
+                pred_mesh_list = pred_mesh_list, 
+                body_bbox_list = body_bbox_list)
         
-        comb_img_r = render_img + (1-alpha) * right_nerf
-        os.makedirs(args.out_dir+"/combl", exist_ok=True)
-        demo_utils.save_res_img(args.out_dir+"/combr", str(i).zfill(5)+'.png', comb_img_r)
+            # load nerf images
+            left_nerf = cv2.imread(osp.join(args.left_nerf_images, str(i).zfill(5)+'.png'))
+            right_nerf = cv2.imread(osp.join(args.right_nerf_images, str(i).zfill(5)+'.png'))
 
-        nerf_img = np.concatenate((comb_img_l, comb_img_r), axis=1)
-        # combined images
-        res_img = np.concatenate((res_img, nerf_img), axis=0)
-        
-        # show result in the screen
-        if not args.no_display:
-            res_img = res_img.astype(np.uint8)
-            ImShow(res_img)
+            # save combined images
+            comb_img_l = render_img + (1-alpha) * left_nerf
+            os.makedirs(args.out_dir+"/combl", exist_ok=True)
+            demo_utils.save_res_img(args.out_dir+"/combl", str(i).zfill(5)+'.png', comb_img_l)
+            
+            comb_img_r = render_img + (1-alpha) * right_nerf
+            os.makedirs(args.out_dir+"/combl", exist_ok=True)
+            demo_utils.save_res_img(args.out_dir+"/combr", str(i).zfill(5)+'.png', comb_img_r)
 
-        # save result image
-        if args.out_dir is not None:
-            os.makedirs(args.out_dir + '/images', exist_ok=True)
-            demo_utils.save_res_img(args.out_dir + '/images', str(i).zfill(5)+'.png', res_img)
+            nerf_img = np.concatenate((comb_img_l, comb_img_r), axis=1)
+            # combined images
+            res_img = np.concatenate((res_img, nerf_img), axis=0)
+            
+            # show result in the screen
+            if not args.no_display:
+                res_img = res_img.astype(np.uint8)
+                ImShow(res_img)
 
-        # save predictions to pkl
-        if args.save_pred_pkl:
-            demo_type = 'body'
-            demo_utils.save_pred_to_pkl(
-                args, demo_type, image_path, body_bbox_list, hand_bbox_list, pred_output_list)
+            # save result image
+            if args.out_dir is not None:
+                os.makedirs(args.out_dir + '/images', exist_ok=True)
+                demo_utils.save_res_img(args.out_dir + '/images', str(i).zfill(5)+'.png', res_img)
+
+            # save predictions to pkl
+            if args.save_pred_pkl:
+                demo_type = 'body'
+                demo_utils.save_pred_to_pkl(
+                    args, demo_type, image_path, body_bbox_list, hand_bbox_list, pred_output_list)
 
         timer.toc(bPrint=True,title="Time")
         print(f"Processed : {image_path}")  
@@ -278,6 +294,23 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
                 save_joints(os.path.join(joint_path, str(mesh_ind).zfill(5)+'.txt'), joints, img_joints, crop_shape, betas)
 
 
+        if args.save_smpl_param:
+            smpl_param_path = os.path.join(args.out_dir, 'smpl_params')
+            if i%args.frame_per_data == 0:
+                fid = data['fid']
+                betas = pred_output_list[0]['pred_betas']
+                aas = pred_output_list[0]['pred_body_pose']
+                
+                beta_fname = os.path.join(smpl_param_path, str(fid).zfill(5)+'_beta.np')
+                aa_fname = os.path.join(smpl_param_path, str(fid).zfill(5)+'_aa.np')
+                np.save(beta_fname, betas)
+                np.save(aa_fname, aas)
+                    
+                
+                
+            
+        
+        
     #save images as a video
     if not args.no_video_out and input_type in ['video', 'webcam']:
         demo_utils.gen_video_out(args.out_dir + '/images', args.res_video_name, fps)
