@@ -47,7 +47,7 @@ class DemoOptions():
         parser.add_argument('--openpose_dir', type=str, help='Directory of storing the prediction of openpose prediction')
 
         # output options
-        parser.add_argument('--out_dir', type=str, default='./mocap_output/get_smpl_params', help='Folder of output images.')
+        parser.add_argument('--out_dir', type=str, default='/home/disk1/inhee/auto_colmap/iphone_inhee_statue/inhee_statue_dynamic/output/segmentations', help='Folder of output images.')
         # parser.add_argument('--pklout', action='store_true', help='Export mocap output as pkl file')
         parser.add_argument('--save_bbox_output', action='store_true', help='Save the bboxes in json files (bbox_xywh format)')
         parser.add_argument('--save_pred_pkl', action='store_true', help='Save the predictions (bboxes, params, meshes in pkl format')
@@ -296,6 +296,7 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
 
         if args.save_smpl_param:
             smpl_param_path = os.path.join(args.out_dir, 'smpl_params')
+            os.makedirs(smpl_param_path, exist_ok=True)
             if i%args.frame_per_data == 0:
                 fid = data['fid']
                 betas = pred_output_list[0]['pred_betas']
