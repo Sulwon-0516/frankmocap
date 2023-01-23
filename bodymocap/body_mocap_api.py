@@ -121,6 +121,10 @@ class BodyMocap(object):
                 pred_output['bbox_top_left'] = bboxTopLeft
                 pred_output['bbox_scale_ratio'] = boxScale_o2n
                 pred_output['faces'] = self.smpl.faces
+                canonical_pose = torch.zeros_like(pred_aa).to(pred_aa.device)
+                canonical_smpl = self.smpl(betas=pred_betas, body_pose=canonical_pose[:,3:], global_orient=canonical_pose[:,:3], pose2rot=True)
+                pred_output['canon_verts'] = canonical_smpl.vertices[0].cpu().numpy()
+
 
                 if self.use_smplx:
                     img_center = np.array((img_original.shape[1], img_original.shape[0]) ) * 0.5

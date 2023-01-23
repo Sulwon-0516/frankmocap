@@ -51,7 +51,7 @@ class Visualizer(object):
 
     def __render_pred_verts(self, img_original, pred_mesh_list):
         assert max(img_original.shape) <= self.input_size, \
-            f"Currently, we donlt support images size larger than:{self.input_size}"
+            f"Currently, we don't support images size larger than:{self.input_size}"
 
         res_img = img_original.copy()
         rend_img = np.ones((self.input_size, self.input_size, 3))

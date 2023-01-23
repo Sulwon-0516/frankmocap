@@ -1,0 +1,1 @@
+python -m demo.cropped_video_3d_bodymocap --out_dir ./mocap_output/global_rot_3

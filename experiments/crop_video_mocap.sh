@@ -1,0 +1,1 @@
+python -m demo.cropped_video_bodymocap --out_dir ./mocap_output/wo_3d
