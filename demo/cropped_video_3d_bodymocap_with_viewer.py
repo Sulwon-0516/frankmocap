@@ -47,11 +47,7 @@ class DemoOptions():
         parser.add_argument('--openpose_dir', type=str, help='Directory of storing the prediction of openpose prediction')
 
         # output options
-<<<<<<< HEAD
-        parser.add_argument('--out_dir', type=str, default='./mocap_output/get_mesh_for_long_view', help='Folder of output images.')
-=======
-        parser.add_argument('--out_dir', type=str, default='/home/disk1/inhee/auto_colmap/iphone_inhee_statue/inhee_statue_dynamic/output/segmentations', help='Folder of output images.')
->>>>>>> 1194a6aa2c8a739bb3cb4b075c8e595d1887dd89
+        parser.add_argument('--out_dir', type=str, default='./mocap_output/get_mesh_with_rest_pose', help='Folder of output images.')
         # parser.add_argument('--pklout', action='store_true', help='Export mocap output as pkl file')
         parser.add_argument('--save_bbox_output', action='store_true', help='Save the bboxes in json files (bbox_xywh format)')
         parser.add_argument('--save_pred_pkl', action='store_true', help='Save the predictions (bboxes, params, meshes in pkl format')
@@ -108,15 +104,10 @@ class DemoOptions():
         parser.add_argument('--right_nerf_images', type=str, default='/mnt/hdd/experiments/nerfstudio/render/nerfacto_pifu_bbox_longer_imgs', help='Resultant video right lower part')
 
 
-<<<<<<< HEAD
-        parser.add_argument('--save_mesh_transformed', action='store_true', help='save the converted mesh')
-        parser.add_argument('--save_for_neuman', action='store_true', help='extract information for mesh')
-=======
         parser.add_argument('--save_mesh_transformed', action='store_true', help='save converted mesh')
         parser.add_argument('--save_smpl_param', action='store_true', help='save raw smpl params')
         parser.add_argument('--is_render', action='store_true', help='render and save imgs')
         
->>>>>>> 1194a6aa2c8a739bb3cb4b075c8e595d1887dd89
         # 3d settings
         # parser.add_argument('--use_trans', action='store_true', help='Consider center shifting')
         
@@ -130,16 +121,13 @@ class DemoOptions():
         self.opt.__setattr__('save_mesh_transformed', False)
         self.opt.__setattr__('save_smpl_param', True)
         self.opt.__setattr__('no_display', True)
-<<<<<<< HEAD
+        # I don't need render output anymore
+        self.opt.__setattr__('is_render', False)
         self.opt.__setattr__('save_for_neuman', False)
 
         self.opt.__setattr__('bbox_path', '/mnt/hdd/auto_colmap/iphone_dynamic/kaist_statue_inhee_dynamic/output/segmentations/selected')
         self.opt.__setattr__('info_3d_path', '/mnt/hdd/auto_colmap/iphone_dynamic/kaist_statue_inhee_dynamic/output/segmentations/selected/3D_info.json')
         self.opt.__setattr__('cropped_path', '/mnt/hdd/auto_colmap/iphone_dynamic/kaist_statue_inhee_dynamic/output/segmentations/cropped')
-=======
-        # I don't need render output anymore
-        self.opt.__setattr__('is_render', False)
->>>>>>> 1194a6aa2c8a739bb3cb4b075c8e595d1887dd89
         return self.opt
 
 def mesh_from_output(pred_output_list, rot, trans, scale, imgSize):
@@ -209,7 +197,11 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
     #modification to extract mesh properly
     if args.save_mesh_transformed or args.save_smpl_param:
         args.__setattr__('frame_per_data', 1)
+    if args.save_mesh_transformed or args.save_smpl_param:
+        args.__setattr__('frame_per_data', 1)
         c2ws = c2ws[0:len(db)]
+        print(len(db))
+
         print(len(db))
 
 
@@ -255,7 +247,26 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
             # load nerf images
             left_nerf = cv2.imread(osp.join(args.left_nerf_images, str(i).zfill(5)+'.png'))
             right_nerf = cv2.imread(osp.join(args.right_nerf_images, str(i).zfill(5)+'.png'))
+        if args.is_render:
+            # visualization
+            res_img, render_img, alpha = visualizer.visualize(
+                img_original_bgr,
+                i,
+                pred_mesh_list = pred_mesh_list, 
+                body_bbox_list = body_bbox_list)
+        
+            # load nerf images
+            left_nerf = cv2.imread(osp.join(args.left_nerf_images, str(i).zfill(5)+'.png'))
+            right_nerf = cv2.imread(osp.join(args.right_nerf_images, str(i).zfill(5)+'.png'))
 
+            # save combined images
+            comb_img_l = render_img + (1-alpha) * left_nerf
+            os.makedirs(args.out_dir+"/combl", exist_ok=True)
+            demo_utils.save_res_img(args.out_dir+"/combl", str(i).zfill(5)+'.png', comb_img_l)
+            
+            comb_img_r = render_img + (1-alpha) * right_nerf
+            os.makedirs(args.out_dir+"/combl", exist_ok=True)
+            demo_utils.save_res_img(args.out_dir+"/combr", str(i).zfill(5)+'.png', comb_img_r)
             # save combined images
             comb_img_l = render_img + (1-alpha) * left_nerf
             os.makedirs(args.out_dir+"/combl", exist_ok=True)
@@ -273,12 +284,29 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
             if not args.no_display:
                 res_img = res_img.astype(np.uint8)
                 ImShow(res_img)
+            nerf_img = np.concatenate((comb_img_l, comb_img_r), axis=1)
+            # combined images
+            res_img = np.concatenate((res_img, nerf_img), axis=0)
+            
+            # show result in the screen
+            if not args.no_display:
+                res_img = res_img.astype(np.uint8)
+                ImShow(res_img)
 
             # save result image
             if args.out_dir is not None:
                 os.makedirs(args.out_dir + '/images', exist_ok=True)
                 demo_utils.save_res_img(args.out_dir + '/images', str(i).zfill(5)+'.png', res_img)
+            # save result image
+            if args.out_dir is not None:
+                os.makedirs(args.out_dir + '/images', exist_ok=True)
+                demo_utils.save_res_img(args.out_dir + '/images', str(i).zfill(5)+'.png', res_img)
 
+            # save predictions to pkl
+            if args.save_pred_pkl:
+                demo_type = 'body'
+                demo_utils.save_pred_to_pkl(
+                    args, demo_type, image_path, body_bbox_list, hand_bbox_list, pred_output_list)
             # save predictions to pkl
             if args.save_pred_pkl:
                 demo_type = 'body'
