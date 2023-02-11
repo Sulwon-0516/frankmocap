@@ -104,10 +104,19 @@ class BodyMocap(object):
                 pred_joints_vis_bbox = convert_smpl_to_bbox(pred_joints_vis, camScale, camTrans) 
                 pred_joints_vis_img = convert_bbox_to_oriIm(
                     pred_joints_vis_bbox, boxScale_o2n, bboxTopLeft, img_original.shape[1], img_original.shape[0]) 
+                
+                # Convert original SMPL joints to original image space (X,Y are aligned to image)
+                pred_smpl_joints_3d = smpl_output.smpl_joints[0].cpu().numpy() # (1,54,3)
+                pred_smpl_joints_vis = pred_smpl_joints_3d[:,:3]  # (54,3)
+                pred_smpl_joints_vis_bbox = convert_smpl_to_bbox(pred_smpl_joints_vis, camScale, camTrans) 
+                pred_smpl_joints_vis_img = convert_bbox_to_oriIm(
+                    pred_smpl_joints_vis_bbox, boxScale_o2n, bboxTopLeft, img_original.shape[1], img_original.shape[0]) 
 
                 # Output
                 pred_output['img_cropped'] = img[:, :, ::-1]
                 pred_output['pred_vertices_smpl'] = smpl_output.vertices[0].cpu().numpy() # SMPL vertex in original smpl space
+                pred_output['pred_smpl_joints'] = smpl_output.smpl_joints[0].cpu().numpy() # original SMPL joints in original smpl space
+                pred_output['pred_smpl_joints_img'] = pred_smpl_joints_vis_img # original SMPL joints in image space
                 pred_output['pred_vertices_img'] = pred_vertices_img # SMPL vertex in image space
                 pred_output['pred_joints_img'] = pred_joints_vis_img # SMPL joints in image space
 
@@ -116,6 +125,7 @@ class BodyMocap(object):
 
                 pred_output['pred_rotmat'] = pred_rotmat.detach().cpu().numpy() # (1, 24, 3, 3)
                 pred_output['pred_betas'] = pred_betas.detach().cpu().numpy() # (1, 10)
+                
 
                 pred_output['pred_camera'] = pred_camera
                 pred_output['bbox_top_left'] = bboxTopLeft

@@ -20,7 +20,7 @@ ModelOutput = namedtuple('ModelOutput',
                           'body_pose', 'expression',
                           'left_hand_pose', 'right_hand_pose',
                           'right_hand_joints', 'left_hand_joints',
-                          'jaw_pose'])
+                          'jaw_pose', 'smpl_joints'])
 ModelOutput.__new__.__defaults__ = (None,) * len(ModelOutput._fields)
 
 
@@ -40,13 +40,15 @@ class SMPL(_SMPL):
         smpl_output = super(SMPL, self).forward(*args, **kwargs)
         extra_joints = vertices2joints(self.J_regressor_extra, smpl_output.vertices)        #Additional 9 joints #Check doc/J_regressor_extra.png
         joints = torch.cat([smpl_output.joints, extra_joints], dim=1)               #[N, 24 + 21, 3]  + [N, 9, 3]
+        smpl_joints=joints
         joints = joints[:, self.joint_map, :]
         output = ModelOutput(vertices=smpl_output.vertices,
                              global_orient=smpl_output.global_orient,
                              body_pose=smpl_output.body_pose,
                              joints=joints,
                              betas=smpl_output.betas,
-                             full_pose=smpl_output.full_pose)
+                             full_pose=smpl_output.full_pose,
+                             smpl_joints=smpl_joints)
         return output
 
 

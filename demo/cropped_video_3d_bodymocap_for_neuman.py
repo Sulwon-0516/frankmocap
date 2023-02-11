@@ -48,7 +48,7 @@ class DemoOptions():
         parser.add_argument('--openpose_dir', type=str, help='Directory of storing the prediction of openpose prediction')
 
         # output options
-        parser.add_argument('--out_dir', type=str, default='./mocap_output/get_mesh_for_long_view', help='Folder of output images.')
+        parser.add_argument('--out_dir', type=str, default='./mocap_output/extract_neuman', help='Folder of output images.')
         # parser.add_argument('--pklout', action='store_true', help='Export mocap output as pkl file')
         parser.add_argument('--save_bbox_output', action='store_true', help='Save the bboxes in json files (bbox_xywh format)')
         parser.add_argument('--save_pred_pkl', action='store_true', help='Save the predictions (bboxes, params, meshes in pkl format')
@@ -106,69 +106,9 @@ class DemoOptions():
         '''
         For easy debug
         '''
-        self.opt.__setattr__('save_mesh_transformed', True)
         self.opt.__setattr__('no_display', True)
-        self.opt.__setattr__('save_for_neuman', False)
-
-        self.opt.__setattr__('bbox_path', '/mnt/hdd/auto_colmap/iphone_dynamic/kaist_statue_inhee_dynamic/output/segmentations/selected')
-        self.opt.__setattr__('info_3d_path', '/mnt/hdd/auto_colmap/iphone_dynamic/kaist_statue_inhee_dynamic/output/segmentations/selected/3D_info.json')
-        self.opt.__setattr__('cropped_path', '/mnt/hdd/auto_colmap/iphone_dynamic/kaist_statue_inhee_dynamic/output/segmentations/cropped')
+        self.opt.__setattr__('save_for_neuman', True)
         return self.opt
-
-def mesh_from_output(pred_output_list, rot, trans, scale, imgSize):
-    pred_mesh_list = list()
-    for pred_output in pred_output_list:
-        if pred_output is not None:
-            if 'left_hand' in pred_output: # hand mocap # rotation isn't considered here
-                assert 0, "we don't consider hand now (22.12.28)"
-            else: # body mocap (includes frank/whole/total mocap)
-                vertices = pred_output['pred_vertices_img']
-                vertices = vertices.copy()
-
-                # shift center back
-                vertices[:, 0:2] -= imgSize/2
-
-                # TODO wouldn't it affect scale?
-                mean_d = np.mean(vertices[:, 2])
-                vertices[:, 2] -= mean_d
-
-                # rotate to nerf-coordinate
-                vertices = np.einsum('ix,xj->ij', rot.T, vertices.T)
-                # scale the vertices
-                #vertices[:, 2] += mean_d
-                vertices = vertices * scale / imgSize.max()
-                vertices = vertices.T
-                #vertices[:, 0:3] += trans[[0,2,1]]
-                vertices[:, 0:3] += trans
-                faces = pred_output['faces'].astype(np.int32)
-
-                # also save joints 
-                joints = pred_output['pred_joints_img']
-                joints = joints.copy()
-
-                # shift center back
-                joints[:, 0:2] -= imgSize/2
-
-                # TODO wouldn't it affect scale?
-                mean_d = np.mean(joints[:, 2])
-                joints[:, 2] -= mean_d
-
-                # rotate to nerf-coordinate
-                joints = np.einsum('ix,xj->ij', rot.T, joints.T)
-                # scale the joints
-                #vertices[:, 2] += mean_d
-                joints = joints * scale / imgSize.max()
-                joints = joints.T
-                #vertices[:, 0:3] += trans[[0,2,1]]
-                joints[:, 0:3] += trans
-                
-                pred_mesh_list.append(dict(
-                    vertices = vertices,
-                    faces = faces,
-                    joints = joints
-                ))
-
-    return pred_mesh_list
 
 def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
     #Setup input data to handle different types of inputs
@@ -178,110 +118,41 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
     if len(c2ws) > (len(db) * args.frame_per_data):
         args.__setattr__('frame_per_data', ceil(len(c2ws) / len(db)))
 
-
-    #modification to extract mesh properly
-    if args.save_mesh_transformed:
-        args.frame_per_data = 1
-        c2ws = c2ws[0:len(db)]
-
-    fps = len(c2ws) // seconds 
     timer = Timer()
-    for i in range(len(c2ws)):
-        if i%args.frame_per_data == 0:
-            data = db[i//args.frame_per_data]
-            
-            timer.tic()
-            image_path = str(data['crop_path'])
-            img_original_bgr  = cv2.imread(image_path)
-            body_bbox_list = [data['bbox']]
-            hand_bbox_list = [None, ] * len(body_bbox_list)
-            
-            print("--------------------------------------")
+    for data in db:     
+        timer.tic()
+        image_path = str(data['crop_path'])
+        img_original_bgr  = cv2.imread(image_path)
+        body_bbox_list = [data['bbox']]
+        hand_bbox_list = [None, ] * len(body_bbox_list)
 
-            # save the obtained body & hand bbox to json file
-            if args.save_bbox_output: 
-                demo_utils.save_info_to_json(args, image_path, body_bbox_list, hand_bbox_list)
+        # save the obtained body & hand bbox to json file
+        if args.save_bbox_output: 
+            demo_utils.save_info_to_json(args, image_path, body_bbox_list, hand_bbox_list)
 
-            #Sort the bbox using bbox size 
-            # (no need ordering, because single bbox list)
-            if args.single_person and len(body_bbox_list)>0:
-                body_bbox_list = [body_bbox_list[0], ] 
-            # Body Pose Regression
-            pred_output_list = body_mocap.regress(img_original_bgr, body_bbox_list)
-            assert len(body_bbox_list) == len(pred_output_list)
-
-            # extract mesh for rendering (vertices in image space and faces) from pred_output_list
-            imgSize = np.array([[img_original_bgr.shape[1], img_original_bgr.shape[0]]])
-            bbox_size = data['nerf_scale']
-            pred_mesh_list = mesh_from_output(pred_output_list, data['rot_mat'], data['trans'], bbox_size, imgSize)
-
-        # visualization
-        res_img, render_img, alpha = visualizer.visualize(
-            img_original_bgr,
-            i,
-            pred_mesh_list = pred_mesh_list, 
-            body_bbox_list = body_bbox_list)
-    
-        # load nerf images
-        left_nerf = cv2.imread(osp.join(args.left_nerf_images, str(i).zfill(5)+'.png'))
-        right_nerf = cv2.imread(osp.join(args.right_nerf_images, str(i).zfill(5)+'.png'))
-
-        # save combined images
-        comb_img_l = render_img + (1-alpha) * left_nerf
-        os.makedirs(args.out_dir+"/combl", exist_ok=True)
-        demo_utils.save_res_img(args.out_dir+"/combl", str(i).zfill(5)+'.png', comb_img_l)
-        
-        comb_img_r = render_img + (1-alpha) * right_nerf
-        os.makedirs(args.out_dir+"/combl", exist_ok=True)
-        demo_utils.save_res_img(args.out_dir+"/combr", str(i).zfill(5)+'.png', comb_img_r)
-
-        nerf_img = np.concatenate((comb_img_l, comb_img_r), axis=1)
-        # combined images
-        res_img = np.concatenate((res_img, nerf_img), axis=0)
-        
-        # show result in the screen
-        if not args.no_display:
-            res_img = res_img.astype(np.uint8)
-            ImShow(res_img)
-
-        # save result image
-        if args.out_dir is not None:
-            os.makedirs(args.out_dir + '/images', exist_ok=True)
-            demo_utils.save_res_img(args.out_dir + '/images', str(i).zfill(5)+'.png', res_img)
-
-        # save predictions to pkl
-        if args.save_pred_pkl:
-            demo_type = 'body'
-            demo_utils.save_pred_to_pkl(
-                args, demo_type, image_path, body_bbox_list, hand_bbox_list, pred_output_list)
+        #Sort the bbox using bbox size 
+        # (no need ordering, because single bbox list)
+        if args.single_person and len(body_bbox_list)>0:
+            body_bbox_list = [body_bbox_list[0], ] 
+        # Body Pose Regression
+        pred_output_list = body_mocap.regress(img_original_bgr, body_bbox_list)
+        assert len(body_bbox_list) == len(pred_output_list)
 
         timer.toc(bPrint=True,title="Time")
         print(f"Processed : {image_path}")  
+        
+        # extract mesh for rendering (vertices in image space and faces) from pred_output_list
+        pred_mesh_list = demo_utils.extract_mesh_from_output(pred_output_list)
 
-        # save meshes
-        if args.save_mesh_transformed:
-            # first make dirs
-            mesh_path = os.path.join(args.out_dir, 'mesh')
-            cmesh_path = os.path.join(args.out_dir, 'canon_mesh')
-            joint_path = os.path.join(args.out_dir, 'joint')
-            os.makedirs(mesh_path, exist_ok=True)
-            os.makedirs(cmesh_path, exist_ok=True)
-            os.makedirs(joint_path, exist_ok=True)
-
-            # save the results.
-            # remove duplicate with following setting
-            if i%args.frame_per_data == 0:
-                mesh_ind = data['fid']
-                # save the first one only
-                vertices = pred_mesh_list[0]['vertices']
-                faces = pred_mesh_list[0]['faces']
-                joints = pred_mesh_list[0]['joints']
-                betas = pred_output_list[0]['pred_betas']
-                img_joints = pred_output_list[0]['pred_joints_img']
-                crop_shape = data['crop_shape']
-                save_obj_mesh(os.path.join(mesh_path,str(mesh_ind).zfill(5)+'.obj'), vertices, faces)
-                save_obj_mesh(os.path.join(cmesh_path,str(mesh_ind).zfill(5)+'.obj'), pred_output_list[0]['canon_verts'], faces)
-                save_joints(os.path.join(joint_path, str(mesh_ind).zfill(5)+'.txt'), joints, img_joints, crop_shape, betas)
+        if False:
+            # visualization
+            res_img = visualizer.visualize(
+                img_original_bgr,
+                pred_mesh_list = pred_mesh_list, 
+                body_bbox_list = body_bbox_list)
+            img_dir = osp.join(args.out_dir, 'imgs')
+            os.makedirs(img_dir, exist_ok=True)
+            demo_utils.save_res_img(img_dir, image_path, res_img)
                 
         # save information for Neuman
         if args.save_for_neuman:
@@ -290,32 +161,27 @@ def crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds):
             
             # shift img_joints into org_image.
             # img joints are in (x,y) order
-            img_joints = pred_output_list[0]['pred_joints_img']
+            mesh_ind = data['fid']
+            img_joints = pred_output_list[0]['pred_smpl_joints_img']
             crop_shape = data['crop_shape']
             x1_org = crop_shape[0]
             y1_org = crop_shape[1]
             org_img_joints = img_joints[:,0:2] + np.array([[x1_org, y1_org]])
             
-            save_data = dict()
-            save_data['result'] = []
-            save_data['result'].append(
+
+            save_data = []
+            save_data.append(
                 {
                     'verts':pred_output_list[0]['pred_vertices_smpl'],
                     'j3d_all54': pred_output_list[0]['pred_smpl_joints'],
                     'pj2d_org': org_img_joints,
-                    'poses': pred_output_list[0]['pred_betas'],
+                    'poses': pred_output_list[0]['pred_body_pose'],
                     'betas':pred_output_list[0]['pred_betas']
                 }
             )
             np.savez(os.path.join(neuman_data_path, str(mesh_ind).zfill(5)+'.npz'), results=save_data)
             
-
-
-
-    #save images as a video
-    if not args.no_video_out and input_type in ['video', 'webcam']:
-        demo_utils.gen_video_out(args.out_dir + '/images', args.res_video_name, fps)
-
+    demo_utils.gen_video_out(args.out_dir + '/imgs', 'result.mp4', 5)
     cv2.destroyAllWindows()
 
 
@@ -332,102 +198,40 @@ def save_obj_mesh(mesh_path, verts, faces=None):
             file.write('f %d %d %d\n' % (f_plus[0], f_plus[2], f_plus[1]))
     file.close()
 
-def save_joints (joints_path, joints, img_joints, crop_shape, betas):
-    file = open(joints_path, 'w')
-
-    for v in joints:
-        file.write('j %.4f %.4f %.4f\n' % (v[0], v[1], v[2]))
-
-    for v in img_joints:
-        file.write('ij %.4f %.4f %.4f\n' % (v[0], v[1], v[2]))
-
-    cs = crop_shape
-    file.write('crop %d %d %d %d\n' % (cs[0], cs[1], cs[2], cs[3]))
-
-    bs = betas.squeeze()
-    file.write('beta')
-    for b in bs:
-        file.write(' %.4f' % (b))
-    file.write('\n')
-
-    file.close()
-
-
-def get_rotmat(dir1, dir2, dir3):
-    # +y : is upper direction here
-    if False:
-        x_dir = np.array([dir2])[:,[0,2,1]]
-        y_dir = np.array([dir1])[:,[0,2,1]]
-        z_dir = -np.array([dir3])[:,[0,2,1]]
-    else:
-        x_dir = np.array([dir2])
-        y_dir = np.array([dir1])
-        z_dir = -np.array([dir3])
-    
-    rot_mat = np.concatenate([x_dir, y_dir, z_dir], axis=0)
-    #rot_mat = rot_mat.transpose() 
-    #because it's inverse calculation here.
-
-    return rot_mat
 
 
 
-def make_db(info_3d, bbox_path, cropped_path):
-    fids = info_3d['fids']
-    order_list = info_3d['order_list']
-
+def make_db(bbox_path, cropped_path):
     db = []
-    for i, fid in enumerate(fids):
-        if order_list[i] == -1:
-            # case where there's no bbox in the image
-            continue
-        data = {}
-        data['crop_path'] = cropped_path / (str(fid).zfill(5)+'.png')
-        data['3d_info'] = info_3d[str(order_list[i])]
-        data['fid'] = fid
-        data['ns_data_idx'] = order_list[i]
+    for cur, dirs, files in os.walk(bbox_path):
+        for file in sorted(files):
+            if file.endswith('npy'):
+                fname = osp.basename(file)[:-4]
+                fid = int(fname)
+                bbox_np = np.load(osp.join(cur, file))[0]
+                
+                data = {}
+                data['fid'] = fid
+                data['crop_path'] = osp.join(cropped_path, fname+'.png')
 
-        # get rotation matrix.
-        dir1 = data['3d_info']['dir1']
-        dir2 = data['3d_info']['dir2']
-        dir3 = data['3d_info']['dir3']
-        rot_mat = get_rotmat(dir1, dir2, dir3)
-        data['rot_mat'] = rot_mat
-        data['trans'] = np.array(data['3d_info']['center'])
+                # absolute position of bbox 
+                x1 = int(floor(bbox_np[0]))
+                x2 = int(floor(bbox_np[2]))
+                y1 = int(ceil(bbox_np[1]))
+                y2 = int(ceil(bbox_np[3]))
 
-
-        # absolute position of crop
-        x0 = data['3d_info']['x'][0]
-        y0 = data['3d_info']['y'][0]
-
-        # get bounding box's relative position in ours
-        bbox_np = np.load(str(bbox_path/(str(fid).zfill(5)+'.npy')))[0]
-
-        # absolute position of bbox 
-        x1 = int(floor(bbox_np[0]))
-        x2 = int(floor(bbox_np[2]))
-        y1 = int(ceil(bbox_np[1]))
-        y2 = int(ceil(bbox_np[3]))
-
-        w = int(x2 - x1)
-        h = int(y2 - y1)
-
-        # add bbox in relative position
-        data['bbox'] = np.array((x1-x0, y1-y0, w, h)).astype(np.int32) 
-        data['nerf_scale'] = data['3d_info']['size']
-        data['img_scale']= max(data['3d_info']['x']) - min(data['3d_info']['x'])
-
-        # bbox location in original image
-        data['org_bbox'] = np.array((x1, y1, w, h))
-
-        # org_width 
-        size = w if w > h else h
-        w_org = int(size*1.2)
-        x1_org = floor((x1+x2-w_org)/2)
-        y1_org = floor((y1+y2-w_org)/2)
-        data['crop_shape'] = np.array((x1_org, y1_org, w_org, w_org))
-
-        db.append(data)
+                w = int(x2 - x1)
+                h = int(y2 - y1)
+                
+                # org_width 
+                size = w if w > h else h
+                w_org = int(size*1.2)
+                x1_org = floor((x1+x2-w_org)/2)
+                y1_org = floor((y1+y2-w_org)/2)
+                data['bbox'] = np.array((x1-x1_org, y1-y1_org, w, h)).astype(np.int32) 
+                data['crop_shape'] = np.array((x1_org, y1_org, w_org, w_org))
+                
+                db.append(data)
 
     return db
 
@@ -485,12 +289,8 @@ def main():
     if not Path(args.cropped_path).exists():
         assert 0, "invalid info_3d_path. use proper path of cropped_path"
     
-    
-    with open(args.info_3d_path, 'r') as f:
-        info_3d = json.load(f)
-
     # build initial db here.
-    db = make_db(info_3d, Path(args.bbox_path), Path(args.cropped_path))
+    db = make_db(Path(args.bbox_path), Path(args.cropped_path))
 
     # load rendering traj
     c2ws, fov, aspect, image_size, seconds = get_path_from_json(args.render_traj_path)
@@ -502,8 +302,8 @@ def main():
     body_mocap = BodyMocap(checkpoint_path, args.smpl_dir, device, use_smplx)
 
     # Set Visualizer
-    from renderer.novelviewRenderer import NovelViewVisualizer
-    visualizer = NovelViewVisualizer(image_size, fov, aspect, c2ws)
+    from renderer.screen_free_visualizer import Visualizer
+    visualizer = Visualizer('pytorch3d')
   
     crop_body_mocap(args, db, body_mocap, visualizer, c2ws, seconds)
 
